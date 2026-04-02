@@ -54,3 +54,4 @@ skills-lock.yml
 # Markdown docs — internal only, not for repo
 *.md
 !README.md
+!CONTRIBUTING.md
