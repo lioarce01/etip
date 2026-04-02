@@ -9,6 +9,206 @@ import pytest
 from tests.conftest import TENANT_ID
 
 
+class TestLevenshtein:
+    def test_identical_strings(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("john", "john") == 0
+
+    def test_single_insertion(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("jon", "john") == 1
+
+    def test_single_substitution(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("cat", "bat") == 1
+
+    def test_single_deletion(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("john", "jon") == 1
+
+    def test_empty_strings(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("", "") == 0
+        assert _levenshtein("abc", "") == 3
+        assert _levenshtein("", "abc") == 3
+
+    def test_completely_different(self):
+        from etip_api.worker.sync import _levenshtein
+        assert _levenshtein("abc", "xyz") == 3
+
+
+class TestNormalizeName:
+    def test_lowercases(self):
+        from etip_api.worker.sync import _normalize_name
+        assert _normalize_name("John Smith") == "john smith"
+
+    def test_strips_accents(self):
+        from etip_api.worker.sync import _normalize_name
+        assert _normalize_name("María García") == "maria garcia"
+        assert _normalize_name("José López") == "jose lopez"
+
+    def test_collapses_whitespace(self):
+        from etip_api.worker.sync import _normalize_name
+        assert _normalize_name("  John   Smith  ") == "john smith"
+
+    def test_combined(self):
+        from etip_api.worker.sync import _normalize_name
+        assert _normalize_name("Héctor  Müller") == "hector muller"
+
+
+class TestNameSimilarity:
+    def test_identical_returns_one(self):
+        from etip_api.worker.sync import _name_similarity
+        assert _name_similarity("John Smith", "John Smith") == 1.0
+
+    def test_accent_variant_returns_one(self):
+        from etip_api.worker.sync import _name_similarity
+        assert _name_similarity("Maria Garcia", "María García") == 1.0
+
+    def test_typo_returns_high_score(self):
+        from etip_api.worker.sync import _name_similarity
+        score = _name_similarity("Jon Smith", "John Smith")
+        assert score >= 0.85
+
+    def test_nickname_variant(self):
+        from etip_api.worker.sync import _name_similarity
+        score = _name_similarity("Mike Johnson", "Michael Johnson")
+        assert 0.0 < score < 0.85  # too different — should NOT merge
+
+    def test_completely_different_names(self):
+        from etip_api.worker.sync import _name_similarity
+        score = _name_similarity("Alice Brown", "Carlos Ruiz")
+        assert score < 0.5
+
+    def test_empty_strings(self):
+        from etip_api.worker.sync import _name_similarity
+        assert _name_similarity("", "") == 1.0
+
+
+class TestFuzzyNameDeduplication:
+    def _make_employee(self, name: str, email: str) -> MagicMock:
+        from etip_api.models.employee import Employee
+        emp = Employee()
+        emp.id = uuid.uuid4()
+        emp.tenant_id = TENANT_ID
+        emp.email = email
+        emp.full_name = name
+        emp.title = None
+        emp.department = None
+        emp.external_ids = {"github": "ghuser"}
+        emp.is_active = True
+        return emp
+
+    def test_typo_in_name_merges_instead_of_insert(self):
+        """One-character typo in first name must merge into existing employee."""
+        from etip_api.worker.sync import _upsert_employee
+        from etip_core.schemas import EmployeeDTO
+
+        existing = self._make_employee("John Smith", "john.smith@acme.com")
+
+        db = MagicMock()
+        # Email lookup: no match (different email from new source)
+        # Candidates load: returns existing employee
+        db.execute.return_value.scalar_one_or_none.return_value = None
+        db.execute.return_value.scalars.return_value.all.return_value = [existing]
+
+        dto = EmployeeDTO(
+            source="hris",
+            external_id="hris-001",
+            email="jsmith@corp.com",       # different email
+            full_name="Jon Smith",          # 1-char typo
+        )
+        _upsert_employee(db, str(TENANT_ID), dto)
+
+        db.add.assert_not_called()
+        assert existing.external_ids.get("hris") == "hris-001"
+
+    def test_accent_variant_merges(self):
+        """Accented name variant must match its ASCII equivalent."""
+        from etip_api.worker.sync import _upsert_employee
+        from etip_core.schemas import EmployeeDTO
+
+        existing = self._make_employee("Maria Garcia", "maria@acme.com")
+
+        db = MagicMock()
+        db.execute.return_value.scalar_one_or_none.return_value = None
+        db.execute.return_value.scalars.return_value.all.return_value = [existing]
+
+        dto = EmployeeDTO(
+            source="jira",
+            external_id="jira-acc-1",
+            email="mgarcia@personal.com",
+            full_name="María García",
+        )
+        _upsert_employee(db, str(TENANT_ID), dto)
+
+        db.add.assert_not_called()
+        assert existing.external_ids.get("jira") == "jira-acc-1"
+
+    def test_completely_different_name_inserts_new(self):
+        """A name below the similarity threshold must create a new employee."""
+        from etip_api.worker.sync import _upsert_employee
+        from etip_core.schemas import EmployeeDTO
+
+        existing = self._make_employee("Alice Brown", "alice@acme.com")
+
+        db = MagicMock()
+        db.execute.return_value.scalar_one_or_none.return_value = None
+        db.execute.return_value.scalars.return_value.all.return_value = [existing]
+
+        dto = EmployeeDTO(
+            source="hris",
+            external_id="hris-002",
+            email="carlos@corp.com",
+            full_name="Carlos Ruiz",
+        )
+        _upsert_employee(db, str(TENANT_ID), dto)
+
+        db.add.assert_called_once()
+
+    def test_email_match_takes_priority_over_name(self):
+        """If email matches, name fuzzy logic must never be reached."""
+        from etip_api.worker.sync import _upsert_employee
+        from etip_core.schemas import EmployeeDTO
+
+        existing = self._make_employee("John Smith", "john@acme.com")
+
+        db = MagicMock()
+        # Email match succeeds on first execute
+        db.execute.return_value.scalar_one_or_none.return_value = existing
+
+        dto = EmployeeDTO(
+            source="hris",
+            external_id="hris-003",
+            email="john@acme.com",
+            full_name="Completely Different Name",
+        )
+        _upsert_employee(db, str(TENANT_ID), dto)
+
+        # Only one DB call (email lookup) — no candidates query
+        assert db.execute.call_count == 1
+        db.add.assert_not_called()
+
+    def test_no_candidates_inserts_new(self):
+        """When tenant has no employees yet, must always insert."""
+        from etip_api.worker.sync import _upsert_employee
+        from etip_core.schemas import EmployeeDTO
+
+        db = MagicMock()
+        db.execute.return_value.scalar_one_or_none.return_value = None
+        db.execute.return_value.scalars.return_value.all.return_value = []
+
+        dto = EmployeeDTO(
+            source="github",
+            external_id="gh-new",
+            email="new@acme.com",
+            full_name="New Person",
+        )
+        _upsert_employee(db, str(TENANT_ID), dto)
+
+        db.add.assert_called_once()
+
+
 class TestNormalizeEmail:
     def test_lowercases(self):
         from etip_api.worker.sync import _normalize_email
@@ -264,8 +464,8 @@ class TestSyncStatusUpdate:
 
         emp_result = MagicMock()
         emp_result.scalars.return_value.all.return_value = [emp]
-        # SET + employee SELECT + Qdrant index select + connector UPDATE
-        db.execute.side_effect = [MagicMock(), emp_result, MagicMock(), MagicMock()]
+        # SET + employee SELECT + connector UPDATE (Qdrant is patched out)
+        db.execute.side_effect = [MagicMock(), emp_result, MagicMock()]
         db.commit = MagicMock()
         db.rollback = MagicMock()
 
@@ -281,6 +481,7 @@ class TestSyncStatusUpdate:
         with patch("sqlalchemy.create_engine"), \
              patch("sqlalchemy.orm.sessionmaker", return_value=session_maker), \
              patch("etip_api.worker.sync.pm") as mock_pm, \
+             patch("etip_api.worker.sync._index_employees_in_qdrant"), \
              patch("etip_core.settings.get_settings") as mock_settings:
             mock_settings.return_value.database_url_sync = "postgresql://x"
             mock_pm.hook.sync_employees.return_value = []

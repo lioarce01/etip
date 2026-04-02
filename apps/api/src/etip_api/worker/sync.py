@@ -4,6 +4,7 @@ Orchestrates: employees → identity merge → skills → ESCO normalization →
 """
 
 import logging
+import unicodedata
 import uuid
 from datetime import UTC, datetime
 
@@ -131,6 +132,51 @@ def run_sync(tenant_id: str, connector_name: str, config: dict, connector_id: st
     }
 
 
+# Minimum similarity ratio (0–1) to consider two names the same person.
+# 0.85 allows 1–2 character edits on typical names without false positives.
+_FUZZY_NAME_THRESHOLD = 0.85
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Standard Levenshtein edit distance (insertions, deletions, substitutions)."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    m, n = len(a), len(b)
+    dp = list(range(n + 1))
+    for i in range(1, m + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, n + 1):
+            temp = dp[j]
+            dp[j] = prev if a[i - 1] == b[j - 1] else 1 + min(prev, dp[j], dp[j - 1])
+            prev = temp
+    return dp[n]
+
+
+def _normalize_name(name: str) -> str:
+    """Lowercase, strip accents, and collapse whitespace for comparison."""
+    nfkd = unicodedata.normalize("NFKD", name)
+    ascii_name = nfkd.encode("ascii", "ignore").decode()
+    return " ".join(ascii_name.lower().split())
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """
+    Returns a similarity ratio in [0.0, 1.0] based on Levenshtein distance
+    over normalized names (lowercased, accent-stripped).
+    """
+    na, nb = _normalize_name(a), _normalize_name(b)
+    if na == nb:
+        return 1.0
+    max_len = max(len(na), len(nb))
+    if max_len == 0:
+        return 1.0
+    return 1.0 - _levenshtein(na, nb) / max_len
+
+
 def _normalize_email(email: str) -> str:
     """
     Return a canonical email address for identity deduplication.
@@ -150,12 +196,41 @@ def _upsert_employee(db: Session, tenant_id: str, dto: EmployeeDTO) -> None:
 
     email = _normalize_email(dto.email)
 
+    # 1. Primary match: normalized email (exact, fast)
     existing = db.execute(
         select(Employee).where(
             Employee.tenant_id == uuid.UUID(tenant_id),
             Employee.email == email,
         )
     ).scalar_one_or_none()
+
+    # 2. Fallback: Levenshtein name fuzzy match
+    #    Only attempted when the email is a synthetic placeholder (e.g. from GitHub)
+    #    or simply not found, and a real full_name is available.
+    if not existing and dto.full_name:
+        candidates = db.execute(
+            select(Employee).where(
+                Employee.tenant_id == uuid.UUID(tenant_id),
+                Employee.is_active.is_(True),
+            )
+        ).scalars().all()
+
+        best: Employee | None = None
+        best_score = 0.0
+        for candidate in candidates:
+            if not candidate.full_name:
+                continue
+            score = _name_similarity(dto.full_name, candidate.full_name)
+            if score > best_score:
+                best_score = score
+                best = candidate
+
+        if best is not None and best_score >= _FUZZY_NAME_THRESHOLD:
+            logger.info(
+                "Identity merge via name fuzzy match: '%s' ~ '%s' (score=%.2f, source=%s)",
+                dto.full_name, best.full_name, best_score, dto.source,
+            )
+            existing = best
 
     if existing:
         existing.full_name = dto.full_name
