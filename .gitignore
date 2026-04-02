@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# uv
+uv.lock
+
+# Node
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Infra
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# AI agents & Claude Code
+.agents/
+.claude/
+CLAUDE.md
+AGENTS.md
+*.claude.json
+
+# Vercel
+.vercel/
+.vercel
+vercel.json
+
+# Skills lock
+skills-lock.json
+skills-lock.yaml
+skills-lock.yml
+
+# Markdown docs — internal only, not for repo
+*.md
+!README.md
