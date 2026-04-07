@@ -1,19 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Search, Upload } from "lucide-react";
-import { useEmployees } from "@/lib/hooks/use-employees";
+import { useEmployees, useDepartments } from "@/lib/hooks/use-employees";
 import { useAuthStore } from "@/lib/store/auth";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
-import { EmployeeDetailSheet } from "@/components/employees/employee-detail-sheet";
 import { SkillBadge } from "@/components/employees/skill-badge";
 import { AvatarInitials } from "@/components/shared/avatar-initials";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Employee } from "@/types/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const PAGE_SIZE = 25;
 
@@ -22,13 +27,29 @@ export default function EmployeesPage() {
   const isAdmin = user?.role === "admin";
 
   const [search, setSearch] = useState("");
+  const [skillFilter, setSkillFilter] = useState("");
+  const [debouncedSkill, setDebouncedSkill] = useState("");
+  const [department, setDepartment] = useState("");
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<Employee | null>(null);
+
+  const { data: departmentsData } = useDepartments();
+  const departments = departmentsData ?? [];
+
+  // Debounce skill filter (200ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSkill(skillFilter);
+      setPage(1); // Reset pagination
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [skillFilter]);
 
   const { data, isLoading } = useEmployees({
     page,
     page_size: PAGE_SIZE,
     search: search || undefined,
+    department: department || undefined,
+    skill: debouncedSkill || undefined,
   });
 
   const employees = data?.items ?? [];
@@ -52,7 +73,7 @@ export default function EmployeesPage() {
         />
 
         {/* Filters */}
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--gray-400)]" />
             <Input
@@ -65,6 +86,34 @@ export default function EmployeesPage() {
               }}
             />
           </div>
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--gray-400)]" />
+            <Input
+              placeholder="Filter by skill..."
+              className="pl-9"
+              value={skillFilter}
+              onChange={(e) => setSkillFilter(e.target.value)}
+            />
+          </div>
+          <Select
+            value={department}
+            onValueChange={(v) => {
+              setDepartment(v === "__all__" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All departments</SelectItem>
+              {departments.map((d) => (
+                <SelectItem key={d} value={d}>
+                  {d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Table */}
@@ -110,10 +159,10 @@ export default function EmployeesPage() {
             />
           ) : (
             employees.map((emp) => (
-              <button
+              <Link
                 key={emp.id}
-                onClick={() => setSelected(emp)}
-                className="grid w-full grid-cols-[2fr_2fr_1fr_2fr_1fr] gap-4 border-b border-[var(--gray-200)] px-4 py-3 text-left text-sm hover:bg-[var(--gray-50)] transition-colors last:border-b-0"
+                href={`/employees/${emp.id}`}
+                className="grid grid-cols-[2fr_2fr_1fr_2fr_1fr] gap-4 border-b border-[var(--gray-200)] px-4 py-3 text-sm hover:bg-[var(--gray-50)] transition-colors last:border-b-0"
               >
                 <div className="flex items-center gap-2">
                   <AvatarInitials
@@ -149,7 +198,7 @@ export default function EmployeesPage() {
                     {emp.is_active ? "Active" : "Inactive"}
                   </span>
                 </div>
-              </button>
+              </Link>
             ))
           )}
         </div>
@@ -183,10 +232,6 @@ export default function EmployeesPage() {
         )}
       </div>
 
-      <EmployeeDetailSheet
-        employee={selected}
-        onClose={() => setSelected(null)}
-      />
     </>
   );
 }

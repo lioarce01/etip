@@ -5,9 +5,182 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects.postgresql import dialect as pg_dialect
 
 from etip_api.models.employee import Employee
 from tests.conftest import EMPLOYEE_ID, TENANT_ID
+
+
+class TestSkillFilter:
+    @pytest.mark.asyncio
+    async def test_skill_filter_query_scoped_to_tenant(self, client, as_tm, override_db):
+        """Skill filter query must include tenant_id in WHERE clause."""
+        captured = {}
+
+        async def _capture(stmt, *args, **kwargs):
+            captured["stmt"] = stmt
+            mock_result = MagicMock()
+            mock_result.scalar_one.return_value = 0
+            return mock_result
+
+        override_db.execute = _capture
+        await client.get("/api/v1/employees?skill=Python")
+
+        compiled = str(captured["stmt"].compile(dialect=pg_dialect()))
+        assert "tenant_id" in compiled
+
+    @pytest.mark.asyncio
+    async def test_skill_filter_uses_exists_subquery(self, client, as_tm, override_db):
+        """Skill filter must use EXISTS subquery to avoid row duplication."""
+        captured = {}
+
+        async def _capture(stmt, *args, **kwargs):
+            captured["stmt"] = stmt
+            mock_result = MagicMock()
+            mock_result.scalar_one.return_value = 0
+            return mock_result
+
+        override_db.execute = _capture
+        await client.get("/api/v1/employees?skill=Python")
+
+        compiled = str(captured["stmt"].compile(dialect=pg_dialect()))
+        assert "EXISTS" in compiled.upper()
+
+    @pytest.mark.asyncio
+    async def test_skill_filter_escapes_like_metacharacters(self, client, as_tm, override_db):
+        """Skill filter must escape % and _ to prevent SQL injection."""
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 0
+        mock_items = MagicMock()
+        mock_items.scalars.return_value.all.return_value = []
+        override_db.execute.side_effect = [mock_count, mock_items]
+
+        resp = await client.get("/api/v1/employees?skill=100%25_test")
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_skill_filter_combined_with_search(self, client, as_tm, override_db, make_employee):
+        """Both search and skill filters should be applied together."""
+        emp = make_employee(skills=["Python"])
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 1
+        mock_items = MagicMock()
+        mock_items.scalars.return_value.all.return_value = [emp]
+        override_db.execute.side_effect = [mock_count, mock_items]
+
+        resp = await client.get("/api/v1/employees?search=Juan&skill=Python")
+        assert resp.status_code == 200
+        assert len(resp.json()["items"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_skill_filter_combined_with_department(self, client, as_tm, override_db, make_employee):
+        """Both department and skill filters should be applied together."""
+        emp = make_employee(skills=["Python"], department="Engineering")
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 1
+        mock_items = MagicMock()
+        mock_items.scalars.return_value.all.return_value = [emp]
+        override_db.execute.side_effect = [mock_count, mock_items]
+
+        resp = await client.get("/api/v1/employees?department=Engineering&skill=Python")
+        assert resp.status_code == 200
+        assert len(resp.json()["items"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_skill_filter_empty_results(self, client, as_tm, override_db):
+        """Skill filter with no matches should return empty list."""
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 0
+        mock_items = MagicMock()
+        mock_items.scalars.return_value.all.return_value = []
+        override_db.execute.side_effect = [mock_count, mock_items]
+
+        resp = await client.get("/api/v1/employees?skill=NonexistentSkill")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0
+
+
+class TestListDepartments:
+    @pytest.mark.asyncio
+    async def test_departments_scoped_to_tenant(self, client, as_tm, override_db):
+        """SQL must filter by tenant_id to prevent cross-tenant leakage."""
+        captured = {}
+
+        async def _capture(stmt, *args, **kwargs):
+            captured["stmt"] = stmt
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        override_db.execute = _capture
+        resp = await client.get("/api/v1/employees/departments")
+
+        assert resp.status_code == 200
+        compiled = captured["stmt"].compile(dialect=pg_dialect())
+        assert "tenant_id" in str(compiled)
+
+    @pytest.mark.asyncio
+    async def test_departments_excludes_null(self, client, as_tm, override_db):
+        """NULL departments must not appear in the result."""
+        captured = {}
+
+        async def _capture(stmt, *args, **kwargs):
+            captured["stmt"] = stmt
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        override_db.execute = _capture
+        await client.get("/api/v1/employees/departments")
+
+        compiled = str(captured["stmt"].compile(dialect=pg_dialect()))
+        # IS NOT NULL expressed as "department IS NOT NULL"
+        assert "IS NOT NULL" in compiled.upper()
+
+    @pytest.mark.asyncio
+    async def test_departments_returns_sorted_list(self, client, as_tm, override_db):
+        """Returned list must be alphabetically ordered."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = [("Engineering",), ("Platform",), ("Sales",)]
+        override_db.execute = AsyncMock(return_value=mock_result)
+
+        resp = await client.get("/api/v1/employees/departments")
+
+        assert resp.status_code == 200
+        assert resp.json() == ["Engineering", "Platform", "Sales"]
+
+    @pytest.mark.asyncio
+    async def test_departments_empty_when_no_data(self, client, as_tm, override_db):
+        """Returns empty list when no employees have a department set."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        override_db.execute = AsyncMock(return_value=mock_result)
+
+        resp = await client.get("/api/v1/employees/departments")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_departments_tm_role_allowed(self, client, as_tm, override_db):
+        """TM role should receive 200."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = [("Engineering",)]
+        override_db.execute = AsyncMock(return_value=mock_result)
+
+        resp = await client.get("/api/v1/employees/departments")
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_departments_admin_role_allowed(self, client, as_admin, override_db):
+        """Admin role should receive 200."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = [("Platform",)]
+        override_db.execute = AsyncMock(return_value=mock_result)
+
+        resp = await client.get("/api/v1/employees/departments")
+        assert resp.status_code == 200
 
 
 class TestListEmployees:
@@ -90,7 +263,7 @@ class TestListEmployees:
 
         resp = await client.get("/api/v1/employees")
         skills = resp.json()["items"][0]["skills"]
-        labels = [s["preferred_label"] for s in skills]
+        labels = [s["skill_label"] for s in skills]
         assert "Python" in labels
         assert "FastAPI" in labels
 

@@ -40,7 +40,14 @@ class TestGenerateExplanation:
         mock_response = MagicMock()
         mock_response.choices[0].message.content = "Juan es ideal para este proyecto porque domina Go y Docker."
 
-        with patch("litellm.acompletion", new=AsyncMock(return_value=mock_response)):
+        with (
+            patch("litellm.acompletion", new=AsyncMock(return_value=mock_response)),
+            patch("etip_api.services.llm.settings") as mock_settings,
+        ):
+            mock_settings.llm_model = "groq/llama-3.3-70b-versatile"
+            mock_settings.groq_api_key = "test-key"
+            mock_settings.openai_api_key = ""
+            mock_settings.anthropic_api_key = ""
             from etip_api.services.llm import generate_explanation
             result = await generate_explanation(mock_project, mock_employee, skill_matches)
 
@@ -51,7 +58,14 @@ class TestGenerateExplanation:
     async def test_returns_none_on_llm_error(self, mock_project, mock_employee):
         skill_matches = _make_skill_matches(["Go"], ["Docker"])
 
-        with patch("litellm.acompletion", new=AsyncMock(side_effect=Exception("API error"))):
+        with (
+            patch("litellm.acompletion", new=AsyncMock(side_effect=Exception("API error"))),
+            patch("etip_api.services.llm.settings") as mock_settings,
+        ):
+            mock_settings.llm_model = "groq/llama-3.3-70b-versatile"
+            mock_settings.groq_api_key = "test-key"
+            mock_settings.openai_api_key = ""
+            mock_settings.anthropic_api_key = ""
             from etip_api.services.llm import generate_explanation
             result = await generate_explanation(mock_project, mock_employee, skill_matches)
 
@@ -79,7 +93,14 @@ class TestGenerateExplanation:
             mock_response.choices[0].message.content = "explanation"
             return mock_response
 
-        with patch("litellm.acompletion", new=capture_call):
+        with (
+            patch("litellm.acompletion", new=capture_call),
+            patch("etip_api.services.llm.settings") as mock_settings,
+        ):
+            mock_settings.llm_model = "groq/llama-3.3-70b-versatile"
+            mock_settings.groq_api_key = "test-key"
+            mock_settings.openai_api_key = ""
+            mock_settings.anthropic_api_key = ""
             from etip_api.services.llm import generate_explanation
             await generate_explanation(mock_project, mock_employee, skill_matches)
 
@@ -98,7 +119,14 @@ class TestGenerateExplanation:
             mock_response.choices[0].message.content = "ok"
             return mock_response
 
-        with patch("litellm.acompletion", new=capture_call):
+        with (
+            patch("litellm.acompletion", new=capture_call),
+            patch("etip_api.services.llm.settings") as mock_settings,
+        ):
+            mock_settings.llm_model = "groq/llama-3.3-70b-versatile"
+            mock_settings.groq_api_key = "test-key"
+            mock_settings.openai_api_key = ""
+            mock_settings.anthropic_api_key = ""
             from etip_api.services.llm import generate_explanation
             await generate_explanation(mock_project, mock_employee, skill_matches)
 

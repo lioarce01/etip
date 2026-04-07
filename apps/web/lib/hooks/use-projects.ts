@@ -70,10 +70,12 @@ export function useSubmitFeedback(projectId: string) {
     mutationFn: ({
       recommendationId,
       feedback,
+      reason,
     }: {
       recommendationId: string;
       feedback: Parameters<typeof submitFeedback>[2];
-    }) => submitFeedback(projectId, recommendationId, feedback),
+      reason?: string;
+    }) => submitFeedback(projectId, recommendationId, feedback, reason),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: projectKeys.recommendations(projectId) }),
   });

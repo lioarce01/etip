@@ -56,10 +56,11 @@ export async function getRecommendations(
 export async function submitFeedback(
   projectId: string,
   recommendationId: string,
-  feedback: "accepted" | "maybe" | "rejected"
+  feedback: "accepted" | "maybe" | "rejected",
+  reason?: string
 ): Promise<void> {
   await apiClient.post(
     `api/v1/projects/${projectId}/recommendations/${recommendationId}/feedback`,
-    { json: { feedback } }
+    { json: { feedback, reason } }
   );
 }

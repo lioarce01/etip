@@ -11,12 +11,14 @@ export async function listEmployees(params?: {
   page_size?: number;
   search?: string;
   department?: string;
+  skill?: string;
 }): Promise<EmployeeListResponse> {
   const searchParams = new URLSearchParams();
   if (params?.page) searchParams.set("page", String(params.page));
   if (params?.page_size) searchParams.set("page_size", String(params.page_size));
   if (params?.search) searchParams.set("search", params.search);
   if (params?.department) searchParams.set("department", params.department);
+  if (params?.skill) searchParams.set("skill", params.skill);
   return apiClient
     .get("api/v1/employees", { searchParams })
     .json<EmployeeListResponse>();
@@ -36,6 +38,10 @@ export async function getEmployeeAvailability(
       searchParams: { start_date: startDate, end_date: endDate },
     })
     .json<EmployeeAvailability>();
+}
+
+export async function listDepartments(): Promise<string[]> {
+  return apiClient.get("api/v1/employees/departments").json<string[]>();
 }
 
 export async function importCSV(file: File): Promise<CSVImportResult> {

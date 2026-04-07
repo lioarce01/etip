@@ -1,6 +1,10 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_JWT_SECRET = "change-me-to-a-32-byte-secret-key"
+_DEFAULT_ENCRYPTION_KEY = "kmydWb4KHWgKTGIXSI3wJ-URjbuYKnSiZlCOY4SUmhE="
 
 
 class Settings(BaseSettings):
@@ -18,10 +22,10 @@ class Settings(BaseSettings):
     qdrant_collection: str = "etip_skills"
 
     # Connector secret encryption (Fernet key — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-    connector_encryption_key: str = "kmydWb4KHWgKTGIXSI3wJ-URjbuYKnSiZlCOY4SUmhE="
+    connector_encryption_key: str = _DEFAULT_ENCRYPTION_KEY
 
     # Auth
-    jwt_secret: str = "change-me-to-a-32-byte-secret-key"
+    jwt_secret: str = _DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
@@ -44,10 +48,33 @@ class Settings(BaseSettings):
     # ESCO
     esco_api_url: str = "https://ec.europa.eu/esco/api"
 
+    # LLM explanation cache
+    llm_explanation_cache_ttl: int = 86400  # seconds (24h default)
+
     # App
     app_env: str = "development"
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Fail fast if insecure defaults are used in production."""
+        if self.app_env != "production":
+            return self
+        errors: list[str] = []
+        if self.jwt_secret == _DEFAULT_JWT_SECRET:
+            errors.append(
+                "JWT_SECRET is still the insecure default — "
+                "generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        if self.connector_encryption_key == _DEFAULT_ENCRYPTION_KEY:
+            errors.append(
+                "CONNECTOR_ENCRYPTION_KEY is still the insecure default — "
+                "generate with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            )
+        if errors:
+            raise ValueError("\n".join(errors))
+        return self
 
 
 @lru_cache

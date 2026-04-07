@@ -218,8 +218,8 @@ class TestImportEmployeesCsv:
         assert list_resp.json()["items"][0]["full_name"] == "Alice New"
 
     async def test_import_scoped_to_caller_tenant(self, client: AsyncClient, db: AsyncSession):
-        token1, _ = await register(client, slug="t1", email="admin@t1.com", company_name="T1")
-        token2, _ = await register(client, slug="t2", email="admin@t2.com", company_name="T2")
+        token1, _ = await register(client, slug="tenant1", email="admin@tenant1.com", company_name="Tenant1")
+        token2, _ = await register(client, slug="tenant2", email="admin@tenant2.com", company_name="Tenant2")
 
         await client.post(
             "/api/v1/employees/import/csv",

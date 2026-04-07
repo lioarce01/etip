@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 interface CandidateMatchCardProps {
   rec: Recommendation;
   rank: number;
-  onFeedback: (recommendationId: string, feedback: FeedbackValue) => Promise<void>;
+  onFeedback: (recommendationId: string, feedback: FeedbackValue, reason?: string) => Promise<void>;
 }
 
 export function CandidateMatchCard({
@@ -25,12 +25,23 @@ export function CandidateMatchCard({
   const [activeFeedback, setActiveFeedback] = useState<FeedbackValue | null>(
     rec.feedback ?? null
   );
+  const [showRejectReason, setShowRejectReason] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   async function handleFeedback(feedback: FeedbackValue) {
+    // On first reject click, show the reason textarea
+    if (feedback === "rejected" && activeFeedback !== "rejected") {
+      setShowRejectReason(true);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await onFeedback(rec.id, feedback);
+      const reason = feedback === "rejected" ? rejectReason : undefined;
+      await onFeedback(rec.id, feedback, reason);
       setActiveFeedback(feedback);
+      setShowRejectReason(false);
+      setRejectReason("");
       toast.success(
         feedback === "accepted"
           ? "Candidate accepted"
@@ -167,6 +178,42 @@ export function CandidateMatchCard({
           <XCircle className="h-4 w-4" /> Reject
         </Button>
       </div>
+
+      {/* Rejection reason textarea */}
+      {showRejectReason && activeFeedback !== "rejected" && (
+        <div className="space-y-2 border-t border-[var(--gray-200)] pt-3">
+          <label className="text-xs font-medium text-[var(--gray-500)] uppercase tracking-wider">
+            Why reject? (optional)
+          </label>
+          <textarea
+            className="w-full h-16 p-2 text-sm border border-[var(--gray-200)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--blue-600)]"
+            placeholder="Provide feedback for future improvements..."
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => handleFeedback("rejected")}
+            >
+              Confirm Rejection
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={submitting}
+              onClick={() => {
+                setShowRejectReason(false);
+                setRejectReason("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

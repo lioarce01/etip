@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -99,12 +99,32 @@ def _to_employee_out(emp: Employee) -> EmployeeOut:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@router.get("/departments", response_model=list[str])
+async def list_departments(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("tm", "admin")),
+) -> list[str]:
+    """Return distinct non-null departments for the tenant, sorted alphabetically."""
+    result = await db.execute(
+        select(Employee.department)
+        .where(
+            Employee.tenant_id == current_user.tenant_id,
+            Employee.is_active.is_(True),
+            Employee.department.is_not(None),
+        )
+        .distinct()
+        .order_by(Employee.department)
+    )
+    return [row for (row,) in result.all()]
+
+
 @router.get("", response_model=EmployeeListOut)
 async def list_employees(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     department: str | None = None,
     search: str | None = None,
+    skill: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("tm", "admin")),
 ) -> EmployeeListOut:
@@ -120,6 +140,18 @@ async def list_employees(
         q = q.where(
             Employee.full_name.ilike(f"%{safe}%", escape="\\") |
             Employee.email.ilike(f"%{safe}%", escape="\\")
+        )
+    if skill:
+        safe = _escape_like(skill)
+        q = q.where(
+            exists(
+                select(EmployeeSkill.id)
+                .join(Skill, EmployeeSkill.skill_id == Skill.id)
+                .where(
+                    EmployeeSkill.employee_id == Employee.id,
+                    Skill.preferred_label.ilike(f"%{safe}%", escape="\\"),
+                )
+            )
         )
 
     total_result = await db.execute(select(func.count()).select_from(q.subquery()))

@@ -14,11 +14,19 @@ export interface User {
   email: string;
   role: Role;
   tenant_id: string;
+  is_platform_admin: boolean;
 }
 
 export interface TokenResponse {
   access_token: string;
   token_type: string;
+}
+
+export interface LoginResponse {
+  access_token?: string;
+  token_type?: string;
+  pre_auth_token?: string;
+  tenants?: Tenant[];
 }
 
 // ── Employees ─────────────────────────────────────────────────────────────────
@@ -45,8 +53,8 @@ export interface Employee {
 
 export interface EmployeeAvailability {
   employee_id: string;
-  start_date: string;
-  end_date: string;
+  capacity_pct: number;
+  allocated_pct: number;
   availability_pct: number;
 }
 
@@ -136,6 +144,21 @@ export interface ConnectorSchema {
     properties: Record<string, { type: string; title?: string; description?: string; default?: unknown }>;
     required?: string[];
   };
+}
+
+// ── Analytics ────────────────────────────────────────────────────────────────
+
+export interface Analytics {
+  total_employees: number;
+  total_projects: number;
+  total_recommendations: number;
+  accepted_count: number;
+  rejected_count: number;
+  maybe_count: number;
+  no_feedback_count: number;
+  precision_at_5: number;
+  precision_at_10: number;
+  acceptance_rate: number;
 }
 
 // ── Pagination ────────────────────────────────────────────────────────────────

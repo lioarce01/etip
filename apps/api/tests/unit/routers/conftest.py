@@ -10,9 +10,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from etip_api.limiter import limiter
 from etip_api.main import app
 from etip_api.database import get_db
 from etip_api.auth.dependencies import get_current_user, require_role
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limiter():
+    """Disable slowapi rate limiting for all unit tests."""
+    limiter.enabled = False
+    yield
+    limiter.enabled = True
 
 
 @pytest.fixture

@@ -1,16 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { useProjects, useDeleteProject } from "@/lib/hooks/use-projects";
+import { useProjects, useCreateProject, useDeleteProject } from "@/lib/hooks/use-projects";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ProjectStatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { SkillBadge } from "@/components/employees/skill-badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProjectForm } from "@/components/projects/project-form";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,7 +39,9 @@ import {
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const { data, isLoading } = useProjects();
+  const { mutateAsync: createProject, isPending: creating } = useCreateProject();
   const { mutate: deleteProject } = useDeleteProject();
 
   const projects = data?.items ?? [];
@@ -41,13 +51,33 @@ export default function ProjectsPage() {
       <PageHeader
         title="Projects"
         action={
-          <Button size="sm" asChild>
-            <Link href="/projects/new">
-              <Plus className="h-4 w-4" /> New Project
-            </Link>
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" /> New Project
           </Button>
         }
       />
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New Project</DialogTitle>
+          </DialogHeader>
+          <ProjectForm
+            onSubmit={async (data) => {
+              try {
+                const project = await createProject(data);
+                toast.success("Project created");
+                setOpen(false);
+                router.push(`/projects/${project.id}`);
+              } catch {
+                toast.error("Failed to create project");
+              }
+            }}
+            onCancel={() => setOpen(false)}
+            isLoading={creating}
+          />
+        </DialogContent>
+      </Dialog>
 
       <div className="rounded-lg border border-[var(--gray-200)] overflow-hidden">
         {/* Header */}
@@ -76,10 +106,8 @@ export default function ProjectsPage() {
             title="No projects yet"
             description="Create your first project to get recommendations."
             actions={
-              <Button size="sm" asChild>
-                <Link href="/projects/new">
-                  <Plus className="h-4 w-4" /> New Project
-                </Link>
+              <Button size="sm" onClick={() => setOpen(true)}>
+                <Plus className="h-4 w-4" /> New Project
               </Button>
             }
           />
@@ -123,9 +151,8 @@ export default function ProjectsPage() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
-                        onClick={() =>
-                          router.push(`/projects/${project.id}?edit=1`)
-                        }
+                        className="text-foreground"
+                        onClick={() => router.push(`/projects/${project.id}?edit=1`)}
                       >
                         <Pencil className="mr-2 h-4 w-4" /> Edit
                       </DropdownMenuItem>
@@ -150,10 +177,8 @@ export default function ProjectsPage() {
                       <AlertDialogAction
                         onClick={() => {
                           deleteProject(project.id, {
-                            onSuccess: () =>
-                              toast.success("Project deleted"),
-                            onError: () =>
-                              toast.error("Failed to delete project"),
+                            onSuccess: () => toast.success("Project deleted"),
+                            onError: () => toast.error("Failed to delete project"),
                           });
                         }}
                       >

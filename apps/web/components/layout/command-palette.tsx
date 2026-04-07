@@ -11,7 +11,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import {
-  BarChart3,
+  LayoutDashboard,
+  TrendingUp,
   Users,
   FolderKanban,
   Plug,
@@ -27,15 +28,16 @@ interface CommandPaletteProps {
 }
 
 const quickActions = [
-  { label: "New Project", href: "/projects/new", icon: Plus },
+  { label: "New Project", href: "/projects", icon: Plus },
   { label: "Import Employees", href: "/employees/import", icon: Upload },
   { label: "Configure Connector", href: "/connectors", icon: Plug },
 ];
 
 const pages = [
-  { label: "Overview", href: "/overview", icon: BarChart3 },
+  { label: "Overview", href: "/overview", icon: LayoutDashboard },
   { label: "Employees", href: "/employees", icon: Users },
   { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Analytics", href: "/analytics", icon: TrendingUp },
   { label: "Connectors", href: "/connectors", icon: Plug },
   { label: "Team", href: "/users", icon: UsersRound },
   { label: "Settings", href: "/settings", icon: Settings },

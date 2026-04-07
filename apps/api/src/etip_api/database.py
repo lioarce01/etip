@@ -36,6 +36,16 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         if tenant_id:
             await session.execute(
-                text(f"SET LOCAL rls.tenant_id = '{tenant_id}'")
+                text("SET LOCAL rls.tenant_id = :tid").bindparams(tid=str(tenant_id))
             )
+        yield session
+
+
+async def get_db_public(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency for public endpoints that don't require authentication.
+    Does NOT set RLS context, so queries can access global tables like tenants.
+    Used for: tenant-by-slug lookup, registration, etc.
+    """
+    async with AsyncSessionLocal() as session:
         yield session

@@ -7,10 +7,19 @@ import jwt
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from starlette.testclient import TestClient
 
 from etip_api.auth.dependencies import get_current_user, require_role
 from etip_api.auth.jwt import create_access_token
 from tests.conftest import TENANT_ID, USER_ID
+
+
+def _mock_request(tenant_id: str | None = None) -> MagicMock:
+    req = MagicMock()
+    req.state = MagicMock(spec=[])
+    if tenant_id:
+        req.state.tenant_id = tenant_id
+    return req
 
 
 @pytest.fixture
@@ -30,7 +39,7 @@ class TestGetCurrentUser:
         user = make_user(role="tm")
         mock_db.get.return_value = user
 
-        result = await get_current_user(credentials=valid_credentials, db=mock_db)
+        result = await get_current_user(request=_mock_request(), credentials=valid_credentials, db=mock_db)
         assert result.id == USER_ID
 
     @pytest.mark.asyncio
@@ -50,14 +59,14 @@ class TestGetCurrentUser:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=expired)
 
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(credentials=creds, db=mock_db)
+            await get_current_user(request=_mock_request(), credentials=creds, db=mock_db)
         assert exc.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_invalid_token_raises_401(self, mock_db):
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="not.a.token")
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(credentials=creds, db=mock_db)
+            await get_current_user(request=_mock_request(), credentials=creds, db=mock_db)
         assert exc.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -67,14 +76,14 @@ class TestGetCurrentUser:
         mock_db.get.return_value = user
 
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(credentials=valid_credentials, db=mock_db)
+            await get_current_user(request=_mock_request(), credentials=valid_credentials, db=mock_db)
         assert exc.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_user_not_found_raises_401(self, valid_credentials, mock_db):
         mock_db.get.return_value = None
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(credentials=valid_credentials, db=mock_db)
+            await get_current_user(request=_mock_request(), credentials=valid_credentials, db=mock_db)
         assert exc.value.status_code == 401
 
 

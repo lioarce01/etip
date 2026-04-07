@@ -58,7 +58,7 @@ class TestTenantBySlug:
         resp = await client.get("/auth/tenant-by-slug/acme")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["tenant_id"] == tenant_id
+        assert body["id"] == tenant_id
         assert body["slug"] == "acme"
 
     async def test_unknown_slug_returns_404(self, client: AsyncClient):
@@ -67,59 +67,87 @@ class TestTenantBySlug:
 
 
 class TestLogin:
-    async def test_valid_credentials_return_access_token(self, client: AsyncClient):
+    async def test_single_tenant_user_returns_access_token(self, client: AsyncClient):
+        """Single-tenant users get access_token directly from login."""
         _, tenant_id = await register(client)
 
         resp = await client.post(
             "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
+            json={"email": "admin@acme.com", "password": "Password1!"},
         )
         assert resp.status_code == 200
-        assert "access_token" in resp.json()
+        body = resp.json()
+        assert "access_token" in body
+        assert body["access_token"]
 
     async def test_login_sets_refresh_cookie(self, client: AsyncClient):
-        _, tenant_id = await register(client)
-
-        resp = await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
-        assert resp.status_code == 200
-        assert "refresh_token" in resp.cookies
-
-    async def test_wrong_password_returns_401(self, client: AsyncClient):
-        _, tenant_id = await register(client)
-
-        resp = await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "WrongPass!", "tenant_id": tenant_id},
-        )
-        assert resp.status_code == 401
-
-    async def test_unknown_email_returns_401(self, client: AsyncClient):
-        _, tenant_id = await register(client)
-
-        resp = await client.post(
-            "/auth/login",
-            json={"email": "nobody@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
-        assert resp.status_code == 401
-
-    async def test_wrong_tenant_returns_401(self, client: AsyncClient):
-        import uuid
         _, _ = await register(client)
 
         resp = await client.post(
             "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": str(uuid.uuid4())},
+            json={"email": "admin@acme.com", "password": "Password1!"},
+        )
+        assert resp.status_code == 200
+        assert "refresh_token" in resp.cookies
+
+    async def test_multi_tenant_user_returns_tenant_list(self, client: AsyncClient):
+        """User with 2 tenants gets pre_auth_token + tenants list."""
+        token1, tid1 = await register(client, slug="tenant1", email="admin@test.com")
+        token2, tid2 = await register(client, slug="tenant2", email="admin@test.com", company_name="Corp 2")
+
+        resp = await client.post(
+            "/auth/login",
+            json={"email": "admin@test.com", "password": "Password1!"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "pre_auth_token" in body
+        assert "tenants" in body
+        assert len(body["tenants"]) == 2
+
+    async def test_select_tenant_after_pre_auth(self, client: AsyncClient):
+        """After login returns tenants, select-tenant completes the flow."""
+        token1, tid1 = await register(client, slug="tenant1", email="admin@test.com")
+        token2, tid2 = await register(client, slug="tenant2", email="admin@test.com", company_name="Corp 2")
+
+        # Get pre-auth
+        login_resp = await client.post(
+            "/auth/login",
+            json={"email": "admin@test.com", "password": "Password1!"},
+        )
+        assert login_resp.status_code == 200
+        assert "pre_auth_token" in login_resp.json()
+
+        # Select first tenant
+        select_resp = await client.post(
+            "/auth/select-tenant",
+            json={"tenant_id": tid1},
+        )
+        assert select_resp.status_code == 200
+        assert "access_token" in select_resp.json()
+
+    async def test_wrong_password_returns_401(self, client: AsyncClient):
+        _, _ = await register(client)
+
+        resp = await client.post(
+            "/auth/login",
+            json={"email": "admin@acme.com", "password": "WrongPass!"},
+        )
+        assert resp.status_code == 401
+
+    async def test_unknown_email_returns_401(self, client: AsyncClient):
+        _, _ = await register(client)
+
+        resp = await client.post(
+            "/auth/login",
+            json={"email": "nobody@acme.com", "password": "Password1!"},
         )
         assert resp.status_code == 401
 
     async def test_inactive_user_returns_401(self, client: AsyncClient):
         token, tenant_id = await register(client)
 
-        # Deactivate own account via admin creating another admin then deactivating self is complex,
-        # so create a member user and deactivate them instead
+        # Create a member user and deactivate them
         create_resp = await client.post(
             "/api/v1/users",
             json={"email": "member@acme.com", "password": "Password1!", "role": "dev"},
@@ -136,7 +164,7 @@ class TestLogin:
 
         resp = await client.post(
             "/auth/login",
-            json={"email": "member@acme.com", "password": "Password1!", "tenant_id": tenant_id},
+            json={"email": "member@acme.com", "password": "Password1!"},
         )
         assert resp.status_code == 401
 
@@ -146,11 +174,7 @@ class TestRefresh:
         _, tenant_id = await register(client)
 
         # Login to get refresh cookie
-        login_resp = await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
-        assert "refresh_token" in login_resp.cookies
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
 
         resp = await client.post("/auth/refresh")
         assert resp.status_code == 200
@@ -159,10 +183,7 @@ class TestRefresh:
     async def test_refresh_rotates_cookie(self, client: AsyncClient):
         _, tenant_id = await register(client)
 
-        await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
         old_cookie = client.cookies.get("refresh_token")
 
         await client.post("/auth/refresh")
@@ -178,10 +199,7 @@ class TestRefresh:
     async def test_used_refresh_token_is_revoked(self, client: AsyncClient):
         _, tenant_id = await register(client)
 
-        await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
         old_token = client.cookies.get("refresh_token")
 
         # First refresh succeeds and rotates
@@ -212,20 +230,14 @@ class TestMe:
 class TestLogout:
     async def test_logout_returns_204(self, client: AsyncClient):
         token, tenant_id = await register(client)
-        await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
 
         resp = await client.post("/auth/logout", headers=auth(token))
         assert resp.status_code == 204
 
     async def test_refresh_fails_after_logout(self, client: AsyncClient):
         token, tenant_id = await register(client)
-        await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
 
         await client.post("/auth/logout", headers=auth(token))
         resp = await client.post("/auth/refresh")
@@ -270,7 +282,7 @@ class TestChangePassword:
 
         resp = await client.post(
             "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
+            json={"email": "admin@acme.com", "password": "Password1!"},
         )
         assert resp.status_code == 401
 
@@ -286,10 +298,7 @@ class TestChangePassword:
 
     async def test_change_password_revokes_refresh_tokens(self, client: AsyncClient):
         token, tenant_id = await register(client)
-        await client.post(
-            "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
-        )
+        await login(client, "admin@acme.com", "Password1!", tenant_id)
         old_refresh = client.cookies.get("refresh_token")
 
         await client.post(
@@ -364,7 +373,7 @@ class TestChangePassword:
         # Immediately try to log in with the OLD password — must fail
         resp2 = await client.post(
             "/auth/login",
-            json={"email": "admin@acme.com", "password": "Password1!", "tenant_id": tenant_id},
+            json={"email": "admin@acme.com", "password": "Password1!"},
         )
         assert resp2.status_code == 401
 

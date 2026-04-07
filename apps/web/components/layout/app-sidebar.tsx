@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  BarChart3,
+  LayoutDashboard,
+  TrendingUp,
   Users,
   FolderKanban,
   Plug,
@@ -12,16 +13,30 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Building2,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/store/auth";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { switchTenant } from "@/lib/api/auth";
+import { getMe, getMyTenants } from "@/lib/api/auth";
 
 const mainNav = [
-  { href: "/overview",   label: "Overview",    icon: BarChart3 },
+  { href: "/overview",   label: "Overview",    icon: LayoutDashboard },
   { href: "/employees",  label: "Employees",   icon: Users },
   { href: "/projects",   label: "Projects",    icon: FolderKanban },
+  { href: "/analytics",  label: "Analytics",   icon: TrendingUp },
   { href: "/connectors", label: "Connectors",  icon: Plug, adminOnly: true },
 ];
 
@@ -70,8 +85,10 @@ function NavItem({
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, tenant, clearAuth } = useAuthStore();
+  const { user, token, tenant, availableTenants, clearAuth, setAuth, setAvailableTenants } = useAuthStore();
+  const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
+  const [switchingTenant, setSwitchingTenant] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("sidebar-collapsed");
@@ -88,6 +105,24 @@ export function AppSidebar() {
   function handleLogout() {
     clearAuth();
     router.push("/login");
+  }
+
+  async function handleSwitchTenant(t: any) {
+    if (!user || !token) return;
+    setSwitchingTenant(true);
+    try {
+      const response = await switchTenant(t.id, token);
+      const updatedUser = await getMe(response.access_token);
+      const myTenants = await getMyTenants(response.access_token);
+      setAvailableTenants(myTenants);
+      setAuth(response.access_token, updatedUser, t);
+      queryClient.invalidateQueries();
+      // Stay on current route — the RLS context will auto-update via middleware
+    } catch {
+      toast.error("Failed to switch workspace.");
+    } finally {
+      setSwitchingTenant(false);
+    }
   }
 
   const isAdmin = user?.role === "admin";
@@ -149,6 +184,32 @@ export function AppSidebar() {
 
       {/* User footer */}
       <div className="border-t border-[var(--gray-200)] p-2">
+        {/* Tenant switcher (multi-tenant only) */}
+        {availableTenants.length > 1 && !collapsed && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center gap-2 rounded-md border border-[var(--gray-200)] bg-background px-2 py-1.5 text-xs font-medium text-foreground hover:bg-[var(--gray-100)] mb-2 transition-colors">
+                <Building2 className="h-3 w-3 shrink-0" />
+                <span className="truncate flex-1 text-left">{tenant?.name}</span>
+                <ChevronsUpDown className="h-3 w-3 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {availableTenants.map((t) => (
+                <DropdownMenuItem
+                  key={t.id}
+                  onClick={() => handleSwitchTenant(t)}
+                  disabled={switchingTenant}
+                  className="text-foreground"
+                >
+                  <span>{t.name}</span>
+                  {t.id === tenant?.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         {collapsed ? (
           <div className="flex flex-col items-center gap-1">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--gray-900)] text-[10px] font-semibold text-white">

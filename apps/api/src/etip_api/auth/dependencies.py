@@ -4,19 +4,19 @@ from uuid import UUID
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etip_api.auth.jwt import decode_access_token
-from etip_api.database import get_db
+from etip_api.database import get_db, get_db_public
 from etip_api.models.user import User
 
 bearer_scheme = HTTPBearer()
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_public),
 ) -> User:
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -33,6 +33,13 @@ async def get_current_user(
     user = await db.get(User, UUID(payload["sub"]))
     if not user or not user.is_active:
         raise unauthorized
+
+    # For platform admins who switched to a different tenant, the JWT carries the active
+    # tenant_id (set by TenantMiddleware → request.state.tenant_id). Override user.tenant_id
+    # so every route handler that filters by current_user.tenant_id uses the correct tenant.
+    active_tenant_id: str | None = getattr(request.state, "tenant_id", None)
+    if active_tenant_id and str(user.tenant_id) != active_tenant_id:
+        user.tenant_id = UUID(active_tenant_id)
 
     return user
 

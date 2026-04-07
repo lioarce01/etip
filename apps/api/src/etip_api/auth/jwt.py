@@ -30,3 +30,26 @@ def decode_access_token(token: str) -> dict:
     if payload.get("type") != "access":
         raise jwt.InvalidTokenError("Not an access token")
     return payload
+
+
+def create_pre_auth_token(email: str) -> str:
+    """Create a short-lived pre-auth token for multi-tenant tenant selection."""
+    payload = {
+        "sub": email,
+        "type": "pre_auth",
+        "exp": datetime.now(UTC) + timedelta(minutes=5),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_pre_auth_token(token: str | None) -> dict:
+    """
+    Decode and validate a pre-auth token.
+    Raises jwt.ExpiredSignatureError or jwt.InvalidTokenError on failure.
+    """
+    if not token:
+        raise jwt.InvalidTokenError("No pre-auth token")
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    if payload.get("type") != "pre_auth":
+        raise jwt.InvalidTokenError("Not a pre-auth token")
+    return payload

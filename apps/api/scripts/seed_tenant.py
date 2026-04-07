@@ -168,14 +168,27 @@ async def get_or_create_skill(db, label: str) -> Skill:
 
 async def seed() -> None:
     async with AsyncSessionLocal() as db:
-        # ── Resolve tenant ────────────────────────────────────────────────────
+        # ── Resolve or create tenant ──────────────────────────────────────────
         tenant = await db.scalar(select(Tenant).where(Tenant.slug == TENANT_SLUG))
         if not tenant:
-            print(f"[seed] tenant '{TENANT_SLUG}' not found. Run seed_tenant.py first.")
-            return
+            print(f"[seed] tenant '{TENANT_SLUG}' not found. Creating...")
+            tenant = Tenant(name="Test Company", slug=TENANT_SLUG)
+            db.add(tenant)
+            await db.flush()
+            # Create admin user
+            admin = User(
+                tenant_id=tenant.id,
+                email=f"admin@{TENANT_SLUG}.com",
+                hashed_password=hash_password("Password123"),
+                role="admin",
+            )
+            db.add(admin)
+            await db.flush()
+            print(f"[seed] created tenant '{tenant.slug}' (id={tenant.id})")
+            print(f"[seed] created admin user: admin@{TENANT_SLUG}.com / Password123")
 
         print(f"[seed] seeding tenant '{tenant.slug}' (id={tenant.id})")
-        await db.execute(text(f"SET LOCAL rls.tenant_id = '{tenant.id}'"))
+        await db.execute(text("SET LOCAL rls.tenant_id = :tid").bindparams(tid=str(tenant.id)))
 
         # ── Extra users ───────────────────────────────────────────────────────
         for u in EXTRA_USERS:

@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from etip_api.database import get_db
+from etip_api.database import get_db, get_db_public
 from etip_api.main import app
 
 _DATABASE_URL = "postgresql+asyncpg://etip:etip@localhost:5432/etip"
@@ -88,15 +88,21 @@ async def client() -> AsyncClient:
         tenant_id = getattr(request.state, "tenant_id", None)
         async with factory() as session:
             if tenant_id:
-                await session.execute(text(f"SET LOCAL rls.tenant_id = '{tenant_id}'"))
+                await session.execute(text("SET LOCAL rls.tenant_id = :tid").bindparams(tid=str(tenant_id)))
+            yield session
+
+    async def _override_get_db_public(request: Request):
+        async with factory() as session:
             yield session
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_db_public] = _override_get_db_public
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             yield c
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_db_public, None)
         await engine.dispose()
 
 
@@ -123,13 +129,25 @@ async def register(
     return token, tenant_id
 
 
-async def login(client: AsyncClient, email: str, password: str, tenant_id: str) -> str:
+async def login(client: AsyncClient, email: str, password: str, tenant_id: str | None = None) -> str:
+    """
+    Login with email/password.
+    For single-tenant users, returns access_token directly.
+    For multi-tenant users, must be followed by select_tenant call in the test.
+    """
     resp = await client.post(
         "/auth/login",
-        json={"email": email, "password": password, "tenant_id": tenant_id},
+        json={"email": email, "password": password},
     )
     assert resp.status_code == 200, f"login failed: {resp.text}"
-    return resp.json()["access_token"]
+    body = resp.json()
+
+    # Single-tenant direct login
+    if "access_token" in body:
+        return body["access_token"]
+
+    # Multi-tenant — caller must handle select_tenant
+    raise AssertionError(f"Multi-tenant login requires select_tenant step. Response: {body}")
 
 
 def auth(token: str) -> dict:

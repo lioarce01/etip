@@ -34,8 +34,8 @@ export default function ProjectDetailPage({
   } = useRecommendations(id);
   const { mutateAsync: submitFeedback } = useSubmitFeedback(id);
 
-  async function handleFeedback(recommendationId: string, feedback: FeedbackValue) {
-    await submitFeedback({ recommendationId, feedback });
+  async function handleFeedback(recommendationId: string, feedback: FeedbackValue, reason?: string) {
+    await submitFeedback({ recommendationId, feedback, reason });
   }
 
   if (projLoading) {
